@@ -1,0 +1,31 @@
+# Ignore compiled objects and executables
+*.o
+*.a
+*.out
+*.exe
+*.suo
+*.ncb
+*.sln
+*.dsp
+*.dsw
+
+# Ignore gprof outputs
+gmon.out
+*_gprof.txt
+*_gprof.dot
+*_gprof.png
+*_gprof.pdf
+
+# Ignore generated images/reports
+traffic*.png
+traffic*.dot
+traffic*.txt
+profile.pdf
+
+data/
+report/
+slides/
+doc
+prof
+README.txt
+speed.txt
