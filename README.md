@@ -2,7 +2,7 @@
 
 ## Dataset Setup
 
-This project uses the **PPM Image Dataset for KLT Feature Tracking**, hosted on Hugging Face.
+This project uses our **PPM Image Dataset for KLT Feature Tracking**, hosted on Hugging Face, in addition to the dataset available in the /data directory in this repository.
 
 To automatically download and extract both image sets:
 
