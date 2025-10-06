@@ -7,7 +7,7 @@ This project uses our **PPM Image Dataset for KLT Feature Tracking**, hosted on 
 To automatically download and extract both image sets:
 
 ```bash
-cd src
+cd src/V1
 python download_dataset.py
 ```
 
@@ -16,8 +16,8 @@ python download_dataset.py
 ```bash
 make clean
 make lib
-make gprof example3
-make dot example3
-make png example3
-make pdf example3
+make gprof
+make dot
+make png
+make pdf
 ```
