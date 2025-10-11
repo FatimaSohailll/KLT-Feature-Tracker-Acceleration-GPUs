@@ -1,8 +1,3 @@
-/**********************************************************************
-Finds the 150 best features in the first frame (img1.pgm) and tracks
-them through the next 9 frames (total 10 frames: img1.pgm → img10.pgm).
-**********************************************************************/
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
