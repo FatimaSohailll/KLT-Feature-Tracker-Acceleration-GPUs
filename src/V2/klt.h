@@ -128,40 +128,40 @@ typedef struct  {
  */
 
 /* Create */
-KLT_TrackingContext KLTCreateTrackingContext(void);
-KLT_FeatureList KLTCreateFeatureList(
+extern KLT_TrackingContext KLTCreateTrackingContext(void);
+extern KLT_FeatureList KLTCreateFeatureList(
   int nFeatures);
-KLT_FeatureHistory KLTCreateFeatureHistory(
+extern KLT_FeatureHistory KLTCreateFeatureHistory(
   int nFrames);
-KLT_FeatureTable KLTCreateFeatureTable(
+extern KLT_FeatureTable KLTCreateFeatureTable(
   int nFrames,
   int nFeatures);
 
 /* Free */
-void KLTFreeTrackingContext(
+extern void KLTFreeTrackingContext(
   KLT_TrackingContext tc);
-void KLTFreeFeatureList(
+extern void KLTFreeFeatureList(
   KLT_FeatureList fl);
-void KLTFreeFeatureHistory(
+extern void KLTFreeFeatureHistory(
   KLT_FeatureHistory fh);
-void KLTFreeFeatureTable(
+extern void KLTFreeFeatureTable(
   KLT_FeatureTable ft);
 
 /* Processing */
-void KLTSelectGoodFeatures(
+extern void KLTSelectGoodFeatures(
   KLT_TrackingContext tc,
   KLT_PixelType *img,
   int ncols,
   int nrows,
   KLT_FeatureList fl);
-void KLTTrackFeatures(
+extern void KLTTrackFeatures(
   KLT_TrackingContext tc,
   KLT_PixelType *img1,
   KLT_PixelType *img2,
   int ncols,
   int nrows,
   KLT_FeatureList fl);
-void KLTReplaceLostFeatures(
+extern void KLTReplaceLostFeatures(
   KLT_TrackingContext tc,
   KLT_PixelType *img,
   int ncols,
@@ -169,66 +169,66 @@ void KLTReplaceLostFeatures(
   KLT_FeatureList fl);
 
 /* Utilities */
-int KLTCountRemainingFeatures(
+extern int KLTCountRemainingFeatures(
   KLT_FeatureList fl);
-void KLTPrintTrackingContext(
+extern void KLTPrintTrackingContext(
   KLT_TrackingContext tc);
-void KLTChangeTCPyramid(
+extern void KLTChangeTCPyramid(
   KLT_TrackingContext tc,
   int search_range);
-void KLTUpdateTCBorder(
+extern void KLTUpdateTCBorder(
   KLT_TrackingContext tc);
-void KLTStopSequentialMode(
+extern void KLTStopSequentialMode(
   KLT_TrackingContext tc);
-void KLTSetVerbosity(
+extern void KLTSetVerbosity(
   int verbosity);
-float _KLTComputeSmoothSigma(
+extern float _KLTComputeSmoothSigma(
   KLT_TrackingContext tc);
 
 /* Storing/Extracting Features */
-void KLTStoreFeatureList(
+extern void KLTStoreFeatureList(
   KLT_FeatureList fl,
   KLT_FeatureTable ft,
   int frame);
-void KLTExtractFeatureList(
+extern void KLTExtractFeatureList(
   KLT_FeatureList fl,
   KLT_FeatureTable ft,
   int frame);
-void KLTStoreFeatureHistory(
+extern void KLTStoreFeatureHistory(
   KLT_FeatureHistory fh,
   KLT_FeatureTable ft,
   int feat);
-void KLTExtractFeatureHistory(
+extern void KLTExtractFeatureHistory(
   KLT_FeatureHistory fh,
   KLT_FeatureTable ft,
   int feat);
 
 /* Writing/Reading */
-void KLTWriteFeatureListToPPM(
+extern void KLTWriteFeatureListToPPM(
   KLT_FeatureList fl,
   KLT_PixelType *greyimg,
   int ncols,
   int nrows,
   char *filename);
-void KLTWriteFeatureList(
+extern void KLTWriteFeatureList(
   KLT_FeatureList fl,
   char *filename,
   char *fmt);
-void KLTWriteFeatureHistory(
+extern void KLTWriteFeatureHistory(
   KLT_FeatureHistory fh,
   char *filename,
   char *fmt);
-void KLTWriteFeatureTable(
+extern void KLTWriteFeatureTable(
   KLT_FeatureTable ft,
   char *filename,
   char *fmt);
-KLT_FeatureList KLTReadFeatureList(
+extern KLT_FeatureList KLTReadFeatureList(
   KLT_FeatureList fl,
   char *filename);
-KLT_FeatureHistory KLTReadFeatureHistory(
+extern KLT_FeatureHistory KLTReadFeatureHistory(
   KLT_FeatureHistory fh,
   char *filename);
-KLT_FeatureTable KLTReadFeatureTable(
+extern KLT_FeatureTable KLTReadFeatureTable(
   KLT_FeatureTable ft,
   char *filename);
 #ifdef __cplusplus

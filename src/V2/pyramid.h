@@ -5,6 +5,10 @@
 #ifndef _PYRAMID_H_
 #define _PYRAMID_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "klt_util.h"
 
 typedef struct  {
@@ -15,18 +19,22 @@ typedef struct  {
 }  _KLT_PyramidRec, *_KLT_Pyramid;
 
 
-_KLT_Pyramid _KLTCreatePyramid(
+extern _KLT_Pyramid _KLTCreatePyramid(
   int ncols,
   int nrows,
   int subsampling,
   int nlevels);
 
-void _KLTComputePyramid(
+extern void _KLTComputePyramid(
   _KLT_FloatImage floatimg, 
   _KLT_Pyramid pyramid,
   float sigma_fact);
 
-void _KLTFreePyramid(
+extern void _KLTFreePyramid(
   _KLT_Pyramid pyramid);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
