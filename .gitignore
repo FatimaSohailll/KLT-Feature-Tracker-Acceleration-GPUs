@@ -22,7 +22,6 @@ traffic*.dot
 traffic*.txt
 profile.pdf
 
-data/
 report/
 slides/
 doc
