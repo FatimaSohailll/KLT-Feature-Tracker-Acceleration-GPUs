@@ -88,6 +88,3 @@ png: dot
 # Convert DOT to PDF
 pdf: dot
 	$(DOT) -Tpdf $(PROFILE_DOT) -o $(PROFILE_PDF)
-
-
-
