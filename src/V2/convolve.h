@@ -1,16 +1,16 @@
 /*********************************************************************
- * convolve.h
+ * convolveGPU.h
  *********************************************************************/
 
 #ifndef _CONVOLVE_H_
 #define _CONVOLVE_H_
 
+#include "klt.h"
+#include "klt_util.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include "klt.h"
-#include "klt_util.h"
 
 extern void _KLTToFloatImage(
   KLT_PixelType *img,

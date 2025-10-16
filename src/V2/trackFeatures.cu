@@ -3,7 +3,6 @@
 #include <math.h>		/* fabs() */
 #include <stdlib.h>		/* malloc() */
 #include <stdio.h>		/* fflush() */
-#include <cuda.h>
 #include <cuda_runtime.h>
 
 /* Our includes */

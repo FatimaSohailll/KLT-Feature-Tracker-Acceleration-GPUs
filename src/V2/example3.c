@@ -32,7 +32,7 @@ int main()
   tc->affineConsistencyCheck = -1;  /* set to 2 for affine consistency check */
 
   /* -------- Read first frame (img1.pgm) -------- */
-  img1 = pgmReadFile("../../data/images_laptops/img1.pgm", NULL, &ncols, &nrows);
+  img1 = pgmReadFile("../../data/images_provided/img0.pgm", NULL, &ncols, &nrows);
   img2 = (unsigned char *) malloc(ncols * nrows * sizeof(unsigned char));
 
   /* -------- Select features in first frame -------- */
@@ -40,8 +40,8 @@ int main()
   KLTStoreFeatureList(fl, ft, 0);
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, "./feat/feat1.ppm");
 
-  for (i = 2; i < nFrames; i++) { 
-    sprintf(fnamein, "../../data/images_laptops/img%d.pgm", i);
+  for (i = 1; i < nFrames; i++) { 
+    sprintf(fnamein, "../../data/images_provided/img%d.pgm", i);
     if (pgmReadFile(fnamein, img2, &ncols, &nrows) == NULL) {
       printf("Error: Could not read %s\n", fnamein);
       break;
