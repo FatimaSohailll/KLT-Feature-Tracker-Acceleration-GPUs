@@ -1,0 +1,39 @@
+# ===================================================
+#  KLT CUDA PROJECT MAKEFILE
+# ===================================================
+
+# Compiler settings
+CC = gcc
+NVCC = nvcc
+
+# Flags
+CFLAGS = -O2 -I. 
+NVCCFLAGS = -O2 -I. 
+
+# Object files
+OBJS_CPU = convolve.o klt.o main.o
+OBJS_GPU = convolveGPU.o trackFeaturesGPU.o
+
+# Output binary name
+TARGET = klt_gpu
+
+# ===================================================
+#  Build rules
+# ===================================================
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS_CPU) $(OBJS_GPU)
+	$(NVCC) $(NVCCFLAGS) -o $@ $^
+
+# Compile CPU .c files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Compile GPU .cu files
+%.o: %.cu
+	$(NVCC) $(NVCCFLAGS) -c $< -o $@
+
+# Clean rule
+clean:
+	rm -f *.o $(TARGET)
