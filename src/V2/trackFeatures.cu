@@ -8,10 +8,10 @@
 /* Our includes */
 #include "base.h"
 #include "error.h"
-#include "convolve.h"	/* for computing pyramid */
-#include "klt.h"
-#include "klt_util.h"	/* _KLT_FloatImage */
-#include "pyramid.h"	/* _KLT_Pyramid */
+#include "convolveGPU.h"	/* for computing pyramid */
+#include "kltGPU.h"
+#include "klt_utilGPU.h"	/* _KLT_FloatImage */
+#include "pyramidGPU.h"	/* _KLT_Pyramid */
 #include "cuda_utils.h"
 
 extern int KLT_verbose;

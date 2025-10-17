@@ -5,8 +5,8 @@
 #ifndef _CONVOLVEGPU_H_
 #define _CONVOLVEGPU_H_
 
-#include "klt.h"
-#include "klt_util.h"
+#include "kltGPU.h"
+#include "klt_utilGPU.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,6 +35,27 @@ extern void convolveSeparateGPU(
   ConvolutionKernel horiz_kernel,
   ConvolutionKernel vert_kernel,
   _KLT_FloatImage imgout);
+
+extern void _KLTToFloatImage(
+  KLT_PixelType *img,
+  int ncols, int nrows,
+  _KLT_FloatImage floatimg);
+
+extern void _KLTComputeGradients(
+  _KLT_FloatImage img,
+  float sigma,
+  _KLT_FloatImage gradx,
+  _KLT_FloatImage grady);
+
+extern void _KLTGetKernelWidths(
+  float sigma,
+  int *gauss_width,
+  int *gaussderiv_width);
+
+extern void _KLTComputeSmoothedImage(
+  _KLT_FloatImage img,
+  float sigma,
+  _KLT_FloatImage smooth);
 
 #ifdef __cplusplus
 }
