@@ -7,7 +7,7 @@ NVCC = nvcc
 # Flags
 FLAG1 = -DNDEBUG
 CFLAGS = $(FLAG1) -pg
-NVCCFLAGS = -O2 -std=c++11 -I. -Wno-deprecated-gpu-targets
+NVCCFLAGS = -std=c++11 -I. -arch=sm_86
 
 ######################################################################
 # CUDA path
@@ -22,10 +22,10 @@ ARCH_CPU = convolve.c error.c pnmio.c pyramid.c selectGoodFeatures.c \
 ARCH_GPU = error.c pnmio.c pyramidGPU.c selectGoodFeaturesGPU.c \
            storeFeaturesGPU.c kltGPU.c klt_utilGPU.c writeFeaturesGPU.c
 
-CU_SOURCES = trackFeatures.cu convolveGPU.cu
+CU_SOURCES = trackFeaturesGPU.cu convolveGPU.cu
 EXAMPLES = example3.c
 
-EXAMPLE3_GPU = $(if $(wildcard example3GPU.c),example3GPU.c,example3.c)
+EXAMPLE3_GPU = example3GPU.c
 
 ######################################################################
 # Libraries
