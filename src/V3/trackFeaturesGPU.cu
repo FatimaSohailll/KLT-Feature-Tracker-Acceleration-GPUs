@@ -512,6 +512,13 @@ void KLTTrackFeatures(
     cudaEventSynchronize(stop_pyramid);
     cudaEventElapsedTime(&pyramid_time, start_pyramid, stop_pyramid);
 
+
+    // create streams to overlap data transfers
+    cudaStream_t stream1, stream2, stream3;
+    cudaStreamCreate(&stream1);
+    cudaStreamCreate(&stream2);
+    cudaStreamCreate(&stream3);
+
     //Host arrays for feature data
     float* h_x1 = (float*)malloc(nFeatures * sizeof(float));
     float* h_y1 = (float*)malloc(nFeatures * sizeof(float));
@@ -545,10 +552,13 @@ void KLTTrackFeatures(
     // Start Host-to-Device memory transfer timer
     cudaEventRecord(start_memcpy_h2d);
 
-    cudaMemcpy(d_x1, h_x1, nFeatures * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_y1, h_y1, nFeatures * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_x2, h_x2, nFeatures * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_y2, h_y2, nFeatures * sizeof(float), cudaMemcpyHostToDevice);
+    // stream 1 copies some of the feature coordinates
+    cudaMemcpyAsync(d_x1, h_x1, nFeatures * sizeof(float), cudaMemcpyHostToDevice, stream1);
+    cudaMemcpyAsync(d_y1, h_y1, nFeatures * sizeof(float), cudaMemcpyHostToDevice, stream1);
+
+    // stream 2 copies other feature coordinates
+    cudaMemcpyAsync(d_x2, h_x2, nFeatures * sizeof(float), cudaMemcpyHostToDevice, stream2);
+    cudaMemcpyAsync(d_y2, h_y2, nFeatures * sizeof(float), cudaMemcpyHostToDevice, stream2);
 
     _KLT_FloatImage base_img1 = pyramid1->img[0];
     _KLT_FloatImage base_gradx1 = pyramid1_gradx->img[0];
@@ -572,13 +582,20 @@ void KLTTrackFeatures(
     cudaMalloc(&d_gradx2, img_size);
     cudaMalloc(&d_grady2, img_size);
 
-    // Copy pyramid images to GPU
-    cudaMemcpy(d_img1, base_img1->data, img_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_gradx1, base_gradx1->data, img_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_grady1, base_grady1->data, img_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_img2, base_img2->data, img_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_gradx2, base_gradx2->data, img_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_grady2, base_grady2->data, img_size, cudaMemcpyHostToDevice);
+    // stream1 copies first image and its gradients
+    cudaMemcpyAsync(d_img1, base_img1->data, img_size, cudaMemcpyHostToDevice, stream1);
+    cudaMemcpyAsync(d_gradx1, base_gradx1->data, img_size, cudaMemcpyHostToDevice, stream1);
+    cudaMemcpyAsync(d_grady1, base_grady1->data, img_size, cudaMemcpyHostToDevice, stream1);
+   
+    // stream 2 copies 2nd image and its gradient
+    cudaMemcpyAsync(d_img2, base_img2->data, img_size, cudaMemcpyHostToDevice, stream2);
+    cudaMemcpyAsync(d_gradx2, base_gradx2->data, img_size, cudaMemcpyHostToDevice, stream2);
+    cudaMemcpyAsync(d_grady2, base_grady2->data, img_size, cudaMemcpyHostToDevice, stream2);
+
+    // wait for all streams to finish their transfers
+    cudaStreamSynchronize(stream1);
+    cudaStreamSynchronize(stream2);
+    cudaStreamSynchronize(stream3);
 
     // Stop Host-to-Device memory transfer timer
     cudaEventRecord(stop_memcpy_h2d);
@@ -618,8 +635,10 @@ void KLTTrackFeatures(
     
     // Start kernel execution timer
     cudaEventRecord(start_kernel);
+
+    // launch kernel on stream 3
     
-    trackFeatureKernel<<<grid, block>>>(
+    trackFeatureKernel<<<grid, block, 0, stream3>>>(
         d_img1, d_gradx1, d_grady1,      // GPU pointers to pyramid images
         d_img2, d_gradx2, d_grady2,      // GPU pointers to pyramid images  
         base_cols, base_rows,            
@@ -633,7 +652,7 @@ void KLTTrackFeatures(
         d_imgdiff, d_gradx, d_grady,
         d_status);
 
-    cudaDeviceSynchronize();
+    cudaStreamSynchronize(stream3);
 
     // Stop kernel execution timer
     cudaEventRecord(stop_kernel);
@@ -644,9 +663,13 @@ void KLTTrackFeatures(
     cudaEventRecord(start_memcpy_d2h);
 
     //copy results back from device
-    cudaMemcpy(h_x2, d_x2, nFeatures * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_y2, d_y2, nFeatures * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_status, d_status, nFeatures * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(h_x2, d_x2, nFeatures * sizeof(float), cudaMemcpyDeviceToHost, stream1);
+    cudaMemcpyAsync(h_y2, d_y2, nFeatures * sizeof(float), cudaMemcpyDeviceToHost, stream2);
+    cudaMemcpyAsync(h_status, d_status, nFeatures * sizeof(int), cudaMemcpyDeviceToHost, stream3);
+
+    cudaStreamSynchronize(stream1);
+    cudaStreamSynchronize(stream2);
+    cudaStreamSynchronize(stream3);
 
     // Stop Device-to-Host memory transfer timer
     cudaEventRecord(stop_memcpy_d2h);
@@ -682,6 +705,10 @@ void KLTTrackFeatures(
     cudaFree(d_imgdiff); cudaFree(d_gradx); cudaFree(d_grady);
     cudaFree(d_img1); cudaFree(d_gradx1); cudaFree(d_grady1);
     cudaFree(d_img2); cudaFree(d_gradx2); cudaFree(d_grady2);
+
+    cudaStreamDestroy(stream1);
+    cudaStreamDestroy(stream2);
+    cudaStreamDestroy(stream3);
 
     //free host memory
     free(h_x1); free(h_y1); free(h_x2); free(h_y2); free(h_status);
