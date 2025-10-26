@@ -520,11 +520,47 @@ void KLTTrackFeatures(
     cudaStreamCreate(&stream3);
 
     //Host arrays for feature data
-    float* h_x1 = (float*)malloc(nFeatures * sizeof(float));
-    float* h_y1 = (float*)malloc(nFeatures * sizeof(float));
-    float* h_x2 = (float*)malloc(nFeatures * sizeof(float));
-    float* h_y2 = (float*)malloc(nFeatures * sizeof(float));
-    int* h_status = (int*)malloc(nFeatures * sizeof(int));
+    float* h_x1, *h_y1, *h_x2, *h_y2;
+    int *h_status;
+
+    cudaError_t err;
+
+    if((err= cudaMallocHost((void**)&h_x1, nFeatures * sizeof(float)))!= cudaSuccess){
+        fprintf(stderr, "cudaMallocHost failed: %s\n", cudaGetErrorString(err));
+        return;
+    }
+
+    if((err= cudaMallocHost((void**)&h_y1, nFeatures * sizeof(float)))!= cudaSuccess){
+        fprintf(stderr, "cudaMallocHost failed: %s\n", cudaGetErrorString(err));
+        cudaFreeHost(h_x1);
+        return;
+    }
+
+    if((err= cudaMallocHost((void**)&h_x2, nFeatures * sizeof(float)))!= cudaSuccess){
+        fprintf(stderr, "cudaMallocHost failed: %s\n", cudaGetErrorString(err));
+        cudaFreeHost(h_x1);
+        cudaFreeHost(h_y1);
+        return;
+    }
+
+    if((err= cudaMallocHost((void**)&h_y2, nFeatures * sizeof(float)))!= cudaSuccess){
+        fprintf(stderr, "cudaMallocHost failed: %s\n", cudaGetErrorString(err));
+        cudaFreeHost(h_x1);
+        cudaFreeHost(h_y1);
+        cudaFreeHost(h_x2);
+        return;
+    }
+
+    if((err= cudaMallocHost(&h_status, nFeatures * sizeof(int)))!= cudaSuccess){
+        fprintf(stderr, "cudaMallocHost failed: %s\n", cudaGetErrorString(err));
+        cudaFreeHost(h_x1);
+        cudaFreeHost(h_y1);
+        cudaFreeHost(h_x2);
+        cudaFreeHost(h_y2);
+        return;
+    }
+
+
 
     for (indx = 0; indx < nFeatures; indx++) {
         h_x1[indx] = featurelist->feature[indx]->x;
@@ -710,8 +746,8 @@ void KLTTrackFeatures(
     cudaStreamDestroy(stream2);
     cudaStreamDestroy(stream3);
 
-    //free host memory
-    free(h_x1); free(h_y1); free(h_x2); free(h_y2); free(h_status);
+    //free host pinned memory
+    cudaFreeHost(h_x1); cudaFreeHost(h_y1); cudaFreeHost(h_x2); cudaFreeHost(h_y2); cudaFreeHost(h_status);
 
     //free pyramid memory
     if (tc->sequentialMode) {
