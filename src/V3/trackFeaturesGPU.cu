@@ -380,17 +380,21 @@ __global__ void trackFeatureKernel(
     float th,
     float max_residue,
     int lighting_insensitive,
-    float* imgdiff_buf,    // Pre-allocated buffers for all features
-    float* gradx_buf,
-    float* grady_buf,
     int* status_out) {
+
+    // declare shared memory
+    extern __shared__ float shared_buffers[];
     
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_features) return;
 
-    float* imgdiff = imgdiff_buf + idx * width * height;
-    float* gradx = gradx_buf + idx * width * height;
-    float* grady = grady_buf + idx * width * height;
+    int window_size = width*height;
+
+    int thread_offset = threadIdx.x * 3 * window_size;
+
+    float* imgdiff = shared_buffers + thread_offset;
+    float* gradx = imgdiff + window_size;
+    float* grady = gradx+window_size;
 
     float x1 = x1_list[idx];
     float y1 = y1_list[idx];
@@ -407,6 +411,7 @@ __global__ void trackFeatureKernel(
         lighting_insensitive,
         imgdiff, gradx, grady);
 
+    // final results in global memory
     x2_list[idx] = x2;
     y2_list[idx] = y2;
     status_out[idx] = status;
@@ -578,13 +583,6 @@ void KLTTrackFeatures(
     cudaMalloc(&d_y2, nFeatures * sizeof(float));
     cudaMalloc(&d_status, nFeatures * sizeof(int));
 
-    //Device memory for temporary buffers
-    int window_size = tc->window_width * tc->window_height;
-    float *d_imgdiff, *d_gradx, *d_grady;
-    cudaMalloc(&d_imgdiff, nFeatures * window_size * sizeof(float));
-    cudaMalloc(&d_gradx, nFeatures * window_size * sizeof(float));
-    cudaMalloc(&d_grady, nFeatures * window_size * sizeof(float));
-
     // Start Host-to-Device memory transfer timer
     cudaEventRecord(start_memcpy_h2d);
 
@@ -660,21 +658,31 @@ void KLTTrackFeatures(
         block_size = 256;
     }
 
+    int window_size = tc->window_height * tc->window_width;
+    
+    size_t shared_mem_per_thread = 3*window_size * sizeof(float);
+    size_t max_shared_mem = prop.sharedMemPerBlock;
+
+    int max_threads_by_shared_mem = max_shared_mem/ shared_mem_per_thread;
+
     // Ensure block size is multiple of warp size and within limits
+    block_size = min(block_size, max_threads_by_shared_mem);
     block_size = min(block_size, max_threads_per_block);
     block_size = (block_size / warp_size) * warp_size;
 
     dim3 block(block_size);
     dim3 grid((nFeatures + block.x - 1) / block.x);
 
-    printf("Launch: %d features -> %d blocks x %d threads\n", nFeatures, grid.x, block.x);
+    size_t shared_mem = block_size *3 * window_size* sizeof(float);
+
+    printf("Launch: %d features -> %d blocks x %d threads, shared memory: %zu bytes\n", nFeatures, grid.x, block.x, shared_mem);
     
     // Start kernel execution timer
     cudaEventRecord(start_kernel);
 
     // launch kernel on stream 3
     
-    trackFeatureKernel<<<grid, block, 0, stream3>>>(
+    trackFeatureKernel<<<grid, block, shared_mem, stream3>>>(
         d_img1, d_gradx1, d_grady1,      // GPU pointers to pyramid images
         d_img2, d_gradx2, d_grady2,      // GPU pointers to pyramid images  
         base_cols, base_rows,            
@@ -685,7 +693,6 @@ void KLTTrackFeatures(
         tc->min_determinant, tc->min_displacement,
         tc->max_residue,
         tc->lighting_insensitive,
-        d_imgdiff, d_gradx, d_grady,
         d_status);
 
     cudaStreamSynchronize(stream3);
@@ -738,7 +745,6 @@ void KLTTrackFeatures(
     //free ALL device memory
     cudaFree(d_x1); cudaFree(d_y1); cudaFree(d_x2); cudaFree(d_y2);
     cudaFree(d_status);
-    cudaFree(d_imgdiff); cudaFree(d_gradx); cudaFree(d_grady);
     cudaFree(d_img1); cudaFree(d_gradx1); cudaFree(d_grady1);
     cudaFree(d_img2); cudaFree(d_gradx2); cudaFree(d_grady2);
 
