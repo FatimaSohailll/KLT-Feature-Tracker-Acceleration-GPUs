@@ -103,55 +103,123 @@ void _KLTGetKernelWidths(
   int *gaussderiv_width)
 {
   computeKernelsGPU(sigma, &gauss_kernel, &gaussderiv_kernel);
-
-  printf("[DEBUG] sigma = %.4f | gauss_width = %d | gaussderiv_width = %d\n",
-         sigma, gauss_kernel.width, gaussderiv_kernel.width);
-
   *gauss_width = gauss_kernel.width;
   *gaussderiv_width = gaussderiv_kernel.width;
 }
 
-__global__ void convolveHorizKernel(const float* imgin, float* imgout,
-                                    int ncols, int nrows,
-                                    const float* kernel, int kWidth) {
-  int x = blockIdx.x * blockDim.x + threadIdx.x;
-  int y = blockIdx.y * blockDim.y + threadIdx.y;
-  int radius = kWidth / 2;
+__global__ void convolveHorizShared(
+    const float* __restrict__ imgin,
+    float* __restrict__ imgout,
+    int ncols, int nrows,
+    const float* __restrict__ kernel,
+    int kWidth)
+{
+    extern __shared__ float tile[];  // dynamic shared memory
 
-  if (x >= ncols || y >= nrows) return;
+    int R = kWidth / 2;
+    int BLOCK_W = blockDim.x;
+    int BLOCK_H = blockDim.y;
 
-  float sum = 0.0f;
+    // Shared tile dimensions (with halo on both sides)
+    int TILE_W = BLOCK_W + 2 * R;
+    int TILE_H = BLOCK_H;
 
-  if (x >= radius && x < ncols - radius) {
-    for (int k = -radius; k <= radius; k++) {
-      sum += imgin[y * ncols + (x + k)] * kernel[radius - k];
+    // Global coordinates of the FIRST pixel this block outputs
+    int out_x = blockIdx.x * BLOCK_W + threadIdx.x;
+    int out_y = blockIdx.y * BLOCK_H + threadIdx.y;
+
+    // To cooperatively load tile, we use a 2D loop over TILE_W x TILE_H
+    // with all 256 threads helping until tile is filled.
+    for (int dy = threadIdx.y; dy < TILE_H; dy += BLOCK_H) {
+        for (int dx = threadIdx.x; dx < TILE_W; dx += BLOCK_W) {
+
+            // Compute the global coordinates of this tile element
+            int gx = blockIdx.x * BLOCK_W + dx - R;
+            int gy = blockIdx.y * BLOCK_H + dy;  // same y
+
+            // Boundary clamp in X
+            gx = max(0, min(gx, ncols - 1));
+
+            // Valid because this is a horizontal convolution tile (only width expands)
+            gy = max(0, min(gy, nrows - 1));
+
+            // Load into shared memory
+            tile[dy * TILE_W + dx] = imgin[gy * ncols + gx];
+        }
     }
-    imgout[y * ncols + x] = sum;
-  } else {
-    imgout[y * ncols + x] = 0.0f;
-  }
+
+    __syncthreads();
+
+    // If output coordinate is outside image grid → nothing to write
+    if (out_x >= ncols || out_y >= nrows) return;
+
+    float sum = 0.0f;
+    int tile_y = threadIdx.y;
+    int tile_x = threadIdx.x + R;     // offset: skip left halo
+
+    // Horizontal convolution entirely from shared memory
+    for (int k = -R; k <= R; k++) {
+        sum += tile[tile_y * TILE_W + (tile_x + k)] * kernel[R - k];
+    }
+
+    imgout[out_y * ncols + out_x] = sum;
 }
 
 
-__global__ void convolveVertKernel(const float* imgin, float* imgout,
-                                   int ncols, int nrows,
-                                   const float* kernel, int kWidth) {
-  int x = blockIdx.x * blockDim.x + threadIdx.x;
-  int y = blockIdx.y * blockDim.y + threadIdx.y;
-  int radius = kWidth / 2;
 
-  if (x >= ncols || y >= nrows) return;
+__global__ void convolveVertShared(
+    const float* __restrict__ imgin,
+    float* __restrict__ imgout,
+    int ncols, int nrows,
+    const float* __restrict__ kernel,
+    int kWidth)
+{
+    extern __shared__ float tile[];  // dynamic shared memory
 
-  float sum = 0.0f;
+    int R = kWidth / 2;
+    int BLOCK_W = blockDim.x;
+    int BLOCK_H = blockDim.y;
 
-  if (y >= radius && y < nrows - radius) {
-    for (int k = -radius; k <= radius; k++) {
-      sum += imgin[(y + k) * ncols + x] * kernel[radius - k];
+    // For vertical convolution: halo extends in Y direction
+    int TILE_W = BLOCK_W;
+    int TILE_H = BLOCK_H + 2 * R;
+
+    // Global output coords
+    int out_x = blockIdx.x * BLOCK_W + threadIdx.x;
+    int out_y = blockIdx.y * BLOCK_H + threadIdx.y;
+
+    // Cooperative load into shared memory
+    for (int dy = threadIdx.y; dy < TILE_H; dy += BLOCK_H) {
+        for (int dx = threadIdx.x; dx < TILE_W; dx += BLOCK_W) {
+
+            // Map tile coordinates -> global image coords
+            int gx = blockIdx.x * BLOCK_W + dx;
+            int gy = blockIdx.y * BLOCK_H + dy - R;
+
+            // Clamp in vertical direction
+            gx = max(0, min(gx, ncols - 1));
+            gy = max(0, min(gy, nrows - 1));
+
+            tile[dy * TILE_W + dx] = imgin[gy * ncols + gx];
+        }
     }
-    imgout[y * ncols + x] = sum;
-  } else {
-    imgout[y * ncols + x] = 0.0f;
-  }
+
+    __syncthreads();
+
+    // Boundary guard
+    if (out_x >= ncols || out_y >= nrows) return;
+
+    float sum = 0.0f;
+
+    int tile_y = threadIdx.y + R;  // skip top halo
+    int tile_x = threadIdx.x;
+
+    // Vertical convolution from shared memory
+    for (int k = -R; k <= R; k++) {
+        sum += tile[(tile_y + k) * TILE_W + tile_x] * kernel[R - k];
+    }
+
+    imgout[out_y * ncols + out_x] = sum;
 }
 
 
@@ -181,7 +249,14 @@ void convolveImageHorizGPU(
   dim3 grid((ncols + block.x - 1) / block.x,
             (nrows + block.y - 1) / block.y);
 
-  convolveHorizKernel<<<grid, block>>>(d_in, d_out, ncols, nrows, d_kernel, kernel.width);
+  int R = kernel.width / 2;
+int sharedBytes = (16 + 2*R) * (16) * sizeof(float);  // TILE_W * TILE_H
+
+convolveHorizShared<<<grid, block, sharedBytes>>>(
+    d_in, d_out,
+    ncols, nrows,
+    d_kernel, kernel.width
+);
   cudaDeviceSynchronize();
 
   cudaMemcpy(imgout->data, d_out, imgSize, cudaMemcpyDeviceToHost);
@@ -214,7 +289,14 @@ void convolveImageVertGPU(
   dim3 grid((ncols + block.x - 1) / block.x,
             (nrows + block.y - 1) / block.y);
 
-  convolveVertKernel<<<grid, block>>>(d_in, d_out, ncols, nrows, d_kernel, kernel.width);
+ int R = kernel.width / 2;
+int sharedBytes = (16) * (16 + 2*R) * sizeof(float);  // TILE_W * TILE_H
+
+convolveVertShared<<<grid, block, sharedBytes>>>(
+    d_in, d_out,
+    ncols, nrows,
+    d_kernel, kernel.width
+);
   cudaDeviceSynchronize();
 
   cudaMemcpy(imgout->data, d_out, imgSize, cudaMemcpyDeviceToHost);
