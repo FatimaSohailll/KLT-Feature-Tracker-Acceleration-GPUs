@@ -1,4 +1,3 @@
-%%writefile convolveGPU.cu
 /*********************************************************************
  * convolveGPU.cu
  *********************************************************************/
@@ -251,7 +250,10 @@ void convolveImageHorizGPU(
             (nrows + block.y - 1) / block.y);
 
   int R = kernel.width / 2;
-int sharedBytes = (32 + 2*R) * (8) * sizeof(float);  // TILE_W * TILE_H
+int TILE_W = block.x + 2*R;
+int TILE_H = block.y;
+int sharedBytes = TILE_W * TILE_H * sizeof(float);
+
 
 convolveHorizShared<<<grid, block, sharedBytes>>>(
     d_in, d_out,
@@ -286,12 +288,15 @@ void convolveImageVertGPU(
   cudaMemcpy(d_in, imgin->data, imgSize, cudaMemcpyHostToDevice);
   cudaMemcpy(d_kernel, kernel.data, kSize, cudaMemcpyHostToDevice);
 
-  dim3 block(32, 8);
+  dim3 block(16, 16);
   dim3 grid((ncols + block.x - 1) / block.x,
             (nrows + block.y - 1) / block.y);
 
  int R = kernel.width / 2;
-int sharedBytes = (32) * (8 + 2*R) * sizeof(float);  // TILE_W * TILE_H
+int TILE_W = block.x + 2*R;
+int TILE_H = block.y;
+int sharedBytes = TILE_W * TILE_H * sizeof(float);
+
 
 convolveVertShared<<<grid, block, sharedBytes>>>(
     d_in, d_out,
