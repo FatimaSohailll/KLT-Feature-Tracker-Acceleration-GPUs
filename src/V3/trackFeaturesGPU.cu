@@ -23,18 +23,6 @@ typedef struct {
     int status;
 } FeatureData;
 
-typedef struct{
-    float* base_ptr;
-    float* img;
-    float* gradx;
-    float* grady;
-} PyramidData;
-
-typedef struct{
-    PyramidData pyramid1;
-    PyramidData pyramid2;
-} PyramidDataCombined;
-
 __device__ float gpu_interpolate(float x, float y, const float* img, int cols, int rows) {
     int xt = (int)x;
     int yt = (int)y;
@@ -363,11 +351,15 @@ __device__ int gpu_trackFeatureSingleLevel(
 }
 
 __global__ void trackFeatureKernel(
-    const PyramidData pyramid1,
-    const PyramidData pyramid2,
+    const float* img1_pyramid, 
+    const float* gradx1_pyramid, 
+    const float* grady1_pyramid,
+    const float* img2_pyramid, 
+    const float* gradx2_pyramid, 
+    const float* grady2_pyramid,
     const int* pyramid_dims,           
-    const int* pyramid_offsets,
-    FeatureData* feature_data,        
+    const int* pyramid_offsets,        
+    FeatureData* feature_data, 
     int num_features,
     int width, int height,
     float step_factor,
@@ -401,11 +393,11 @@ __global__ void trackFeatureKernel(
     int status = KLT_TRACKED;
 
     for (int r = 0; r < nPyramidLevels - 1; r++) {
-        x1 /= subsampling;
-        y1 /= subsampling;
-        x2 /= subsampling;
-        y2 /= subsampling;
-    }
+            x1 /= subsampling;
+            y1 /= subsampling;
+            x2 /= subsampling;
+            y2 /= subsampling;
+        }
 
     // Track through pyramid levels from coarsest to finest
     for (int r = nPyramidLevels - 1; r >= 0; r--) {
@@ -416,12 +408,12 @@ __global__ void trackFeatureKernel(
         int nc = pyramid_dims[r * 2];
         int nr = pyramid_dims[r * 2 + 1];
         
-        const float* img1_level = pyramid1.img + level_offset;
-        const float* gradx1_level = pyramid1.gradx + level_offset;
-        const float* grady1_level = pyramid1.grady + level_offset;
-        const float* img2_level = pyramid2.img + level_offset;
-        const float* gradx2_level = pyramid2.gradx + level_offset;
-        const float* grady2_level = pyramid2.grady + level_offset;
+        const float* img1_level = img1_pyramid + level_offset;
+        const float* gradx1_level = gradx1_pyramid + level_offset;
+        const float* grady1_level = grady1_pyramid + level_offset;
+        const float* img2_level = img2_pyramid + level_offset;
+        const float* gradx2_level = gradx2_pyramid + level_offset;
+        const float* grady2_level = grady2_pyramid + level_offset;
 
         // Track at current level
         status = gpu_trackFeatureSingleLevel(
@@ -449,91 +441,6 @@ __global__ void trackFeatureKernel(
     feat->status = status;
 }
 
-void allocatePyramidonGPU(PyramidData* pd, int total_size){
-    size_t total_bytes = total_size * sizeof(float) * 3;
-    cudaMalloc(&pd->base_ptr, total_bytes);
-
-    pd->img = pd->base_ptr;
-    pd->gradx = pd->img + total_size;
-    pd->grady = pd->gradx + total_size;
-}
-
-void allocatePyramidDataCombined(PyramidDataCombined* data, int total_size){
-    allocatePyramidonGPU(&data->pyramid1, total_size);
-    allocatePyramidonGPU(&data->pyramid2, total_size);
-}
-
-void freePyramidData(PyramidData* pd){
-    if (pd->img != NULL) {
-        cudaFree(pd->base_ptr);  // Free the base pointer
-        pd->base_ptr = NULL;
-        pd->img = NULL;
-        pd->gradx = NULL;
-        pd->grady = NULL;
-    }
-}
-
-// free combined data
-void freePyramidDataCombined(PyramidDataCombined* data){
-    freePyramidData(&data->pyramid1);
-    freePyramidData(&data->pyramid2);
-}
-
-float* transferPyramidData(PyramidData* d_pyramid, 
-                        _KLT_Pyramid img_pyramid,
-                        _KLT_Pyramid gradx_pyramid, 
-                        _KLT_Pyramid grady_pyramid,
-                        int* pyramid_offsets, 
-                        int nLevels, 
-                        int total_size,
-                        cudaStream_t stream) {
-    
-    // Allocate pinned host memory for efficient transfer
-    float* h_buffer;
-    cudaMallocHost(&h_buffer, total_size * 3 * sizeof(float));
-    
-    // Set up host pointers in SOA layout
-    float* h_img = h_buffer;
-    float* h_gradx = h_img + total_size;
-    float* h_grady = h_gradx + total_size;
-    
-    // Copy pyramid data to host buffer in SOA layout
-    for (int i = 0; i < nLevels; i++) {
-        int level_size = img_pyramid->ncols[i] * img_pyramid->nrows[i];
-        int offset = pyramid_offsets[i];
-        
-        memcpy(h_img + offset, img_pyramid->img[i]->data, level_size * sizeof(float));
-        memcpy(h_gradx + offset, gradx_pyramid->img[i]->data, level_size * sizeof(float));
-        memcpy(h_grady + offset, grady_pyramid->img[i]->data, level_size * sizeof(float));
-    }
-    
-    // Single asynchronous transfer
-    cudaMemcpyAsync(d_pyramid->base_ptr, h_buffer, total_size * 3 * sizeof(float),
-                   cudaMemcpyHostToDevice, stream);
-    
-    //cudaStreamSynchronize(stream);
-    return h_buffer;
-}
-
-void transferPyramidDataCombined(PyramidDataCombined* d_data,
-                                _KLT_Pyramid img1_pyramid, _KLT_Pyramid gradx1_pyramid, _KLT_Pyramid grady1_pyramid,
-                                _KLT_Pyramid img2_pyramid, _KLT_Pyramid gradx2_pyramid, _KLT_Pyramid grady2_pyramid,
-                                int* pyramid_offsets, int nLevels, int total_size,
-                                cudaStream_t stream1, cudaStream_t stream2) {
-    
-    // Transfer pyramid1 in stream1
-    float* h_buffer1=transferPyramidData(&d_data->pyramid1, img1_pyramid, gradx1_pyramid, grady1_pyramid,
-                       pyramid_offsets, nLevels, total_size, stream1);
-    // Transfer pyramid2 in stream2
-    float* h_buffer2 = transferPyramidData(&d_data->pyramid2, img2_pyramid, gradx2_pyramid, grady2_pyramid,
-                       pyramid_offsets, nLevels, total_size, stream2);
-    
-    cudaStreamSynchronize(stream1);
-    cudaStreamSynchronize(stream2);
-    cudaFreeHost(h_buffer1);
-    cudaFreeHost(h_buffer2);
-}
-
 void KLTTrackFeatures(
     KLT_TrackingContext tc,
     KLT_PixelType* img1,
@@ -549,13 +456,14 @@ void KLTTrackFeatures(
     int i, indx;
     KLT_BOOL floatimg1_created = FALSE;
 
-    // Create CUDA streams for overlapping operations
+    // Create pyramids (your original pyramid creation code)
+    tmpimg = _KLTCreateFloatImage(ncols, nrows);
+
     cudaStream_t stream1, stream2;
     cudaStreamCreate(&stream1);
     cudaStreamCreate(&stream2);
 
-    tmpimg = _KLTCreateFloatImage(ncols, nrows);
-
+    // First image pyramid
     if (tc->sequentialMode && tc->pyramid_last != NULL) {
         pyramid1 = (_KLT_Pyramid)tc->pyramid_last;
         pyramid1_gradx = (_KLT_Pyramid)tc->pyramid_last_gradx;
@@ -573,6 +481,32 @@ void KLTTrackFeatures(
             _KLTComputeGradients(pyramid1->img[i], tc->grad_sigma, pyramid1_gradx->img[i], pyramid1_grady->img[i]);
     }
 
+    // Second image pyramid
+    floatimg2 = _KLTCreateFloatImage(ncols, nrows);
+    _KLTToFloatImage(img2, ncols, nrows, tmpimg);
+    _KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg2);
+    pyramid2 = _KLTCreatePyramid(ncols, nrows, (int)subsampling, tc->nPyramidLevels);
+    _KLTComputePyramid(floatimg2, pyramid2, tc->pyramid_sigma_fact);
+    pyramid2_gradx = _KLTCreatePyramid(ncols, nrows, (int)subsampling, tc->nPyramidLevels);
+    pyramid2_grady = _KLTCreatePyramid(ncols, nrows, (int)subsampling, tc->nPyramidLevels);
+    for (i = 0; i < tc->nPyramidLevels; i++)
+        _KLTComputeGradients(pyramid2->img[i], tc->grad_sigma, pyramid2_gradx->img[i], pyramid2_grady->img[i]);
+
+    int nFeatures = featurelist->nFeatures;
+
+    // Prepare feature data
+    FeatureData* h_feature_data;
+    cudaMallocHost((void**)&h_feature_data, nFeatures * sizeof(FeatureData));
+    
+    for (indx = 0; indx < nFeatures; indx++) {
+        h_feature_data[indx].x1 = featurelist->feature[indx]->x;
+        h_feature_data[indx].y1 = featurelist->feature[indx]->y;
+        h_feature_data[indx].x2 = featurelist->feature[indx]->x;
+        h_feature_data[indx].y2 = featurelist->feature[indx]->y;
+        h_feature_data[indx].status = -1;
+    }
+
+    // Calculate pyramid data organization
     int total_pyramid_size = 0;
     int* h_pyramid_dims = (int*)malloc(tc->nPyramidLevels * 2 * sizeof(int));
     int* h_pyramid_offsets = (int*)malloc(tc->nPyramidLevels * sizeof(int));
@@ -584,83 +518,86 @@ void KLTTrackFeatures(
         total_pyramid_size += pyramid1->ncols[i] * pyramid1->nrows[i];
     }
 
-    int nFeatures = featurelist->nFeatures;
-    int window_size = tc->window_width * tc->window_height;
-
-    PyramidDataCombined pyramid_data;
-    allocatePyramidDataCombined(&pyramid_data, total_pyramid_size);
-
-    // Feature data
-    FeatureData* h_feature_data;
-    cudaMallocHost(&h_feature_data, nFeatures * sizeof(FeatureData));
-    
-    for (indx = 0; indx < nFeatures; indx++) {
-        h_feature_data[indx].x1 = featurelist->feature[indx]->x;
-        h_feature_data[indx].y1 = featurelist->feature[indx]->y;
-        h_feature_data[indx].x2 = featurelist->feature[indx]->x;
-        h_feature_data[indx].y2 = featurelist->feature[indx]->y;
-        h_feature_data[indx].status = -1;
-    }
-
+    // Device memory allocations
     FeatureData* d_feature_data;
     cudaMalloc(&d_feature_data, nFeatures * sizeof(FeatureData));
 
-    // Workspace buffers
+    int window_size = tc->window_width * tc->window_height;
     float *d_imgdiff, *d_gradx, *d_grady;
     cudaMalloc(&d_imgdiff, nFeatures * window_size * sizeof(float));
     cudaMalloc(&d_gradx, nFeatures * window_size * sizeof(float));
     cudaMalloc(&d_grady, nFeatures * window_size * sizeof(float));
 
-    // Pyramid metadata
-    int* d_pyramid_dims, *d_pyramid_offsets;
+    int* d_pyramid_dims;
+    int* d_pyramid_offsets;
+    float *d_img1_pyramid, *d_gradx1_pyramid, *d_grady1_pyramid;
+    float *d_img2_pyramid, *d_gradx2_pyramid, *d_grady2_pyramid;
+    
     cudaMalloc(&d_pyramid_dims, tc->nPyramidLevels * 2 * sizeof(int));
     cudaMalloc(&d_pyramid_offsets, tc->nPyramidLevels * sizeof(int));
+    cudaMalloc(&d_img1_pyramid, total_pyramid_size * sizeof(float));
+    cudaMalloc(&d_gradx1_pyramid, total_pyramid_size * sizeof(float));
+    cudaMalloc(&d_grady1_pyramid, total_pyramid_size * sizeof(float));
+    cudaMalloc(&d_img2_pyramid, total_pyramid_size * sizeof(float));
+    cudaMalloc(&d_gradx2_pyramid, total_pyramid_size * sizeof(float));
+    cudaMalloc(&d_grady2_pyramid, total_pyramid_size * sizeof(float));
 
-    // Copy common data first
+    // Copy data to device
     cudaMemcpyAsync(d_feature_data, h_feature_data, nFeatures * sizeof(FeatureData), cudaMemcpyHostToDevice, stream1);
     cudaMemcpyAsync(d_pyramid_dims, h_pyramid_dims, tc->nPyramidLevels * 2 * sizeof(int), cudaMemcpyHostToDevice, stream1);
     cudaMemcpyAsync(d_pyramid_offsets, h_pyramid_offsets, tc->nPyramidLevels * sizeof(int), cudaMemcpyHostToDevice, stream1);
 
-    // Start Pyramid 1 transfer
-    transferPyramidData(&pyramid_data.pyramid1, 
-                       pyramid1, pyramid1_gradx, pyramid1_grady,
-                       h_pyramid_offsets, tc->nPyramidLevels, total_pyramid_size, stream1);
+    // Copy pyramid data
+    for (i = 0; i < tc->nPyramidLevels; i++) {
+        int level_size = pyramid1->ncols[i] * pyramid1->nrows[i];
+        int offset = h_pyramid_offsets[i];
+        
+        cudaMemcpyAsync(d_img1_pyramid + offset, pyramid1->img[i]->data, level_size * sizeof(float), cudaMemcpyHostToDevice, stream2);
+        cudaMemcpyAsync(d_gradx1_pyramid + offset, pyramid1_gradx->img[i]->data, level_size * sizeof(float), cudaMemcpyHostToDevice, stream2);
+        cudaMemcpyAsync(d_grady1_pyramid + offset, pyramid1_grady->img[i]->data, level_size * sizeof(float), cudaMemcpyHostToDevice, stream2);
+        
+        cudaMemcpyAsync(d_img2_pyramid + offset, pyramid2->img[i]->data, level_size * sizeof(float), cudaMemcpyHostToDevice, stream2);
+        cudaMemcpyAsync(d_gradx2_pyramid + offset, pyramid2_gradx->img[i]->data, level_size * sizeof(float), cudaMemcpyHostToDevice, stream2);
+        cudaMemcpyAsync(d_grady2_pyramid + offset, pyramid2_grady->img[i]->data, level_size * sizeof(float), cudaMemcpyHostToDevice, stream2);
+    }
 
-    floatimg2 = _KLTCreateFloatImage(ncols, nrows);
-    _KLTToFloatImage(img2, ncols, nrows, tmpimg);
-    _KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg2);
-    pyramid2 = _KLTCreatePyramid(ncols, nrows, (int)subsampling, tc->nPyramidLevels);
-    _KLTComputePyramid(floatimg2, pyramid2, tc->pyramid_sigma_fact);
-    pyramid2_gradx = _KLTCreatePyramid(ncols, nrows, (int)subsampling, tc->nPyramidLevels);
-    pyramid2_grady = _KLTCreatePyramid(ncols, nrows, (int)subsampling, tc->nPyramidLevels);
-    for (i = 0; i < tc->nPyramidLevels; i++)
-        _KLTComputeGradients(pyramid2->img[i], tc->grad_sigma, pyramid2_gradx->img[i], pyramid2_grady->img[i]);
-
-    transferPyramidData(&pyramid_data.pyramid2, 
-                       pyramid2, pyramid2_gradx, pyramid2_grady,
-                       h_pyramid_offsets, tc->nPyramidLevels, total_pyramid_size, stream2);
-
-    size_t workspace_size = nFeatures * window_size * sizeof(float);
-    cudaMemsetAsync(d_imgdiff, 0, workspace_size, stream1);
-    cudaMemsetAsync(d_gradx, 0, workspace_size, stream1);
-    cudaMemsetAsync(d_grady, 0, workspace_size, stream1);
-
-    // Wait for all preparations to complete
     cudaStreamSynchronize(stream1);
     cudaStreamSynchronize(stream2);
 
-    int block_size = 256;
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+
+    // Get GPU-specific information
+    int max_threads_per_block = prop.maxThreadsPerBlock;
+    int multiprocessor_count = prop.multiProcessorCount;
+    int warp_size = prop.warpSize;
+
+    // Calculate optimal block size for nFeatures
+    int block_size;
+    if (nFeatures <= 32) {
+        block_size = 32; // 1 warp
+    } else if (nFeatures <= 64) {
+        block_size = 64; // 2 warps
+    } else if (nFeatures <= 128) {
+        block_size = 128; // 4 warps
+    } else if (nFeatures <= 256) {
+        block_size = 256; // 8 warps
+    } else {
+        block_size = 256;
+    }
+
+    // Ensure block size is multiple of warp size and within limits
+    block_size = min(block_size, max_threads_per_block);
+    block_size = (block_size / warp_size) * warp_size;
+
     dim3 block(block_size);
     dim3 grid((nFeatures + block.x - 1) / block.x);
 
-    if (KLT_verbose >= 1) {
-        fprintf(stderr, "(KLT) Launching kernel with %d features, %d blocks, %d threads per block...\n",
-                nFeatures, grid.x, block.x);
-        fflush(stderr);
-    }
+    printf("Launch: %d features -> %d blocks x %d threads\n", nFeatures, grid.x, block.x);
 
-    trackFeatureKernel<<<grid, block>>>(
-        pyramid_data.pyramid1, pyramid_data.pyramid2,
+    trackFeatureKernel<<<grid, block, 0, stream1>>>(
+        d_img1_pyramid, d_gradx1_pyramid, d_grady1_pyramid,
+        d_img2_pyramid, d_gradx2_pyramid, d_grady2_pyramid,
         d_pyramid_dims, d_pyramid_offsets,
         d_feature_data, nFeatures,
         tc->window_width, tc->window_height,
@@ -670,12 +607,18 @@ void KLTTrackFeatures(
         subsampling, tc->nPyramidLevels,
         d_imgdiff, d_gradx, d_grady);
 
-    cudaDeviceSynchronize();
+    cudaStreamSynchronize(stream1);
     
+    // Check for kernel errors
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Kernel execution failed: %s\n", cudaGetErrorString(err));
+    }
+
+    // Copy results back
     cudaMemcpy(h_feature_data, d_feature_data, nFeatures * sizeof(FeatureData), cudaMemcpyDeviceToHost);
 
     // Update feature list
-    int tracked_count = 0;
     for (indx = 0; indx < nFeatures; indx++) {
         FeatureData* feat = &h_feature_data[indx];
         if (feat->status != KLT_TRACKED) {
@@ -686,30 +629,26 @@ void KLTTrackFeatures(
             featurelist->feature[indx]->x = feat->x2;
             featurelist->feature[indx]->y = feat->y2;
             featurelist->feature[indx]->val = KLT_TRACKED;
-            tracked_count++;
         }
     }
 
-    freePyramidDataCombined(&pyramid_data);
-    cudaFree(d_feature_data);
-    cudaFree(d_imgdiff);
-    cudaFree(d_gradx);
-    cudaFree(d_grady);
-    cudaFree(d_pyramid_dims);
-    cudaFree(d_pyramid_offsets);
-    cudaFreeHost(h_feature_data);
-    
     cudaStreamDestroy(stream1);
     cudaStreamDestroy(stream2);
+
+    // Cleanup
+    cudaFree(d_feature_data);
+    cudaFree(d_imgdiff); cudaFree(d_gradx); cudaFree(d_grady);
+    cudaFree(d_pyramid_dims); cudaFree(d_pyramid_offsets);
+    cudaFree(d_img1_pyramid); cudaFree(d_gradx1_pyramid); cudaFree(d_grady1_pyramid);
+    cudaFree(d_img2_pyramid); cudaFree(d_gradx2_pyramid); cudaFree(d_grady2_pyramid);
     
+    cudaFreeHost(h_feature_data);
     free(h_pyramid_dims);
     free(h_pyramid_offsets);
 
-    // Free CPU resources
+    // Free other resources...
     _KLTFreeFloatImage(tmpimg);
-    if (floatimg1_created) {
-        _KLTFreeFloatImage(floatimg1);
-    }
+    if (floatimg1_created) _KLTFreeFloatImage(floatimg1);
     _KLTFreeFloatImage(floatimg2);
     
     if (!tc->sequentialMode) {
@@ -729,7 +668,8 @@ void KLTTrackFeatures(
     }
 
     if (KLT_verbose >= 1) {
-        fprintf(stderr, "\n\t%d features successfully tracked.\n", tracked_count);
+        fprintf(stderr, "\n\t%d features successfully tracked.\n",
+            KLTCountRemainingFeatures(featurelist));
         fflush(stderr);
     }
 }
