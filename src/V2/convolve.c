@@ -11,6 +11,7 @@
 #include "base.h"
 #include "error.h"
 #include "convolve.h"
+#include "convolveGPU.h"
 #include "klt_util.h"   /* printing */
 
 #define MAX_KERNEL_WIDTH 	71
@@ -287,8 +288,8 @@ void _KLTComputeGradients(
   if (fabs(sigma - sigma_last) > 0.05)
     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
 	
-  _convolveSeparate(img, gaussderiv_kernel, gauss_kernel, gradx);
-  _convolveSeparate(img, gauss_kernel, gaussderiv_kernel, grady);
+  _convolveSeparateGPU(img, gaussderiv_kernel, gauss_kernel, gradx);
+  _convolveSeparateGPU(img, gauss_kernel, gaussderiv_kernel, grady);
 
 }
 	
@@ -310,7 +311,7 @@ void _KLTComputeSmoothedImage(
   if (fabs(sigma - sigma_last) > 0.05)
     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
 
-  _convolveSeparate(img, gauss_kernel, gauss_kernel, smooth);
+  _convolveSeparateGPU(img, gauss_kernel, gauss_kernel, smooth);
 }
 
 

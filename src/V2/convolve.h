@@ -2,39 +2,31 @@
  * convolveGPU.h
  *********************************************************************/
 
-#ifndef _CONVOLVE_H_
-#define _CONVOLVE_H_
+#ifndef _CONVOLVEGPU_H_
+#define _CONVOLVEGPU_H_
 
 #include "klt.h"
 #include "klt_util.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-extern void _KLTToFloatImage(
+void _KLTToFloatImage(
   KLT_PixelType *img,
   int ncols, int nrows,
   _KLT_FloatImage floatimg);
 
-extern void _KLTComputeGradients(
+void _KLTComputeGradients(
   _KLT_FloatImage img,
   float sigma,
   _KLT_FloatImage gradx,
   _KLT_FloatImage grady);
 
-extern void _KLTGetKernelWidths(
+void _KLTGetKernelWidths(
   float sigma,
   int *gauss_width,
   int *gaussderiv_width);
 
-extern void _KLTComputeSmoothedImage(
+void _KLTComputeSmoothedImage(
   _KLT_FloatImage img,
   float sigma,
   _KLT_FloatImage smooth);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif

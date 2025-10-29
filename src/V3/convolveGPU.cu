@@ -275,5 +275,6 @@ void _KLTComputeSmoothedImage(
     computeKernelsGPU(sigma, &gauss_kernel, &gaussderiv_kernel);
 
   convolveSeparateGPU(img, gauss_kernel, gauss_kernel, smooth);
+}
 
 }
