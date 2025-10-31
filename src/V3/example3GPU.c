@@ -1,9 +1,9 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 #include <string.h>
 #include "pnmio.h"
 #include "kltGPU.h"
-
 /* #define REPLACE */
 
 #ifdef WIN32
@@ -18,7 +18,7 @@ int main()
   KLT_FeatureList fl;
   KLT_FeatureTable ft;
   int nFeatures = 150;
-  int nFrames = 10;  
+  int nFrames = 300;  
   int ncols, nrows;
   int i;
 
@@ -32,7 +32,7 @@ int main()
   tc->affineConsistencyCheck = -1;  /* set to 2 for affine consistency check */
 
   /* -------- Read first frame (img1.pgm) -------- */
-  img1 = pgmReadFile("img0.pgm", NULL, &ncols, &nrows);
+  img1 = pgmReadFile("./dataset2/img0.pgm", NULL, &ncols, &nrows);
   img2 = (unsigned char *) malloc(ncols * nrows * sizeof(unsigned char));
 
   /* -------- Select features in first frame -------- */
@@ -40,14 +40,19 @@ int main()
   KLTStoreFeatureList(fl, ft, 0);
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, "./feat/feat1.ppm");
 
+  double timeTotal = 0.0; 
   for (i = 1; i < nFrames; i++) { 
-    sprintf(fnamein, "img%d.pgm", i);
+    sprintf(fnamein, "./dataset2/img%d.pgm", i);
     if (pgmReadFile(fnamein, img2, &ncols, &nrows) == NULL) {
       printf("Error: Could not read %s\n", fnamein);
       break;
     }
 
+    clock_t start = clock();
     KLTTrackFeatures(tc, img1, img2, ncols, nrows, fl);
+    clock_t end = clock();
+
+    timeTotal += (double)(end-start);
 
 #ifdef REPLACE
     KLTReplaceLostFeatures(tc, img2, ncols, nrows, fl);
@@ -70,6 +75,9 @@ int main()
   KLTFreeTrackingContext(tc);
   free(img1);
   free(img2);
+
+  timeTotal = ((double)(timeTotal))/ CLOCKS_PER_SEC;
+  printf("Total tracking time: %.6f seconds\n", timeTotal);
 
   return 0;
 }
