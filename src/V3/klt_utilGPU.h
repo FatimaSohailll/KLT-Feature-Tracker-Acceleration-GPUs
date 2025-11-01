@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 typedef struct  {
-  int ncols;
+  int ncols;src/V3/img0.pgm
   int nrows;
   float *data;           // CPU data pointer
   float *gpu_data;       // GPU data pointer  
