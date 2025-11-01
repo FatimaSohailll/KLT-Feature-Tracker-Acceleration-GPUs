@@ -41,6 +41,11 @@ extern void _KLTToFloatImage(
   int ncols, int nrows,
   _KLT_FloatImage floatimg);
 
+extern void _KLTToFloatImageGPU(
+    KLT_PixelType *img,
+    int ncols, int nrows,
+    _KLT_FloatImage floatimg);
+    
 extern void _KLTComputeGradients(
   _KLT_FloatImage img,
   float sigma,
@@ -56,6 +61,25 @@ extern void _KLTComputeSmoothedImage(
   _KLT_FloatImage img,
   float sigma,
   _KLT_FloatImage smooth);
+extern void _KLTComputeSmoothedImageGPU(
+  _KLT_FloatImage img,
+  float sigma,
+  _KLT_FloatImage smooth);
+
+extern void convolveSeparateGPUDevicePyramids(
+    float* d_imgin,
+    float* d_imgout,
+    int ncols, int nrows,
+    ConvolutionKernel horiz_kernel,
+    ConvolutionKernel vert_kernel,
+    int horiz_deriv,
+    int vert_deriv);
+
+extern void _KLTComputeGradientsGPU(
+  _KLT_FloatImage img,
+  float sigma,
+  _KLT_FloatImage gradx,
+  _KLT_FloatImage grady);
 
 #ifdef __cplusplus
 }

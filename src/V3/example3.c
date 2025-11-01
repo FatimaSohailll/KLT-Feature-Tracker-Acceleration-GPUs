@@ -18,7 +18,7 @@ int main()
   KLT_FeatureList fl;
   KLT_FeatureTable ft;
   int nFeatures = 150;
-  int nFrames = 300;  
+  int nFrames = 10;  
   int ncols, nrows;
   int i;
 
@@ -32,7 +32,7 @@ int main()
   tc->affineConsistencyCheck = -1;  /* set to 2 for affine consistency check */
 
   /* -------- Read first frame (img1.pgm) -------- */
-  img1 = pgmReadFile("./dataset2/img0.pgm", NULL, &ncols, &nrows);
+  img1 = pgmReadFile("../../data/images_provided/img0.pgm", NULL, &ncols, &nrows);
   img2 = (unsigned char *) malloc(ncols * nrows * sizeof(unsigned char));
 
   /* -------- Select features in first frame -------- */
@@ -42,7 +42,7 @@ int main()
 
   double timeTotal = 0.0; 
   for (i = 1; i < nFrames; i++) { 
-    sprintf(fnamein, "./dataset2/img%d.pgm", i);
+    sprintf(fnamein, "../../data/images_provided/img%d.pgm", i);
     if (pgmReadFile(fnamein, img2, &ncols, &nrows) == NULL) {
       printf("Error: Could not read %s\n", fnamein);
       break;

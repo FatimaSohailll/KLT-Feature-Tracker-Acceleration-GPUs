@@ -33,6 +33,19 @@ extern void _KLTComputePyramid(
 extern void _KLTFreePyramid(
   _KLT_Pyramid pyramid);
 
+extern _KLT_Pyramid _KLTCreatePyramidGPU(
+  int ncols,
+  int nrows,
+  int subsampling,
+  int nlevels);
+extern void _KLTComputePyramidGPU(
+  _KLT_FloatImage floatimg, 
+  _KLT_Pyramid pyramid,
+  float sigma_fact);
+
+extern void _KLTFreePyramidGPU(
+  _KLT_Pyramid pyramid);
+
 #ifdef __cplusplus
 }
 #endif
