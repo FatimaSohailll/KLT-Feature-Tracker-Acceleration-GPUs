@@ -1,17 +1,12 @@
-/*********************************************************************
- * convolveGPU.cu
- *********************************************************************/
-
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <stdio.h>
 #include <assert.h>
 #include "convolveGPU.h"
-#include "error.h"  // For KLTError if needed
+#include "error.h"
 
 #define MAX_KERNEL_WIDTH 71
 
-/* Kernels */
 static ConvolutionKernel gauss_kernel;
 static ConvolutionKernel gaussderiv_kernel;
 static float sigma_last = -10.0;
@@ -21,10 +16,6 @@ static size_t d_alloc_size = 0;
 // device constant memory for kernels
 __constant__ float d_kernel[MAX_KERNEL_WIDTH];
 __constant__ float d_kernel_deriv[MAX_KERNEL_WIDTH];
-
-// ===============================
-// Device kernels
-// ===============================
 
 static void ensureDeviceBuffers(size_t newSizeBytes)
 {
@@ -37,10 +28,7 @@ static void ensureDeviceBuffers(size_t newSizeBytes)
     }
 }
 
-void _KLTToFloatImage(
-  KLT_PixelType *img,
-  int ncols, int nrows,
-  _KLT_FloatImage floatimg)
+void _KLTToFloatImage( KLT_PixelType *img, int ncols, int nrows, _KLT_FloatImage floatimg)
 {
   KLT_PixelType *ptrend = img + ncols*nrows;
   float *ptrout = floatimg->data;
@@ -55,18 +43,49 @@ void _KLTToFloatImage(
   while (img < ptrend)  *ptrout++ = (float) *img++;
 }
 
-static void computeKernelsGPU(
-  float sigma,
-  ConvolutionKernel *gauss,
-  ConvolutionKernel *gaussderiv)
+__global__ void convertToFloatKernel( const KLT_PixelType* __restrict__ img, float* __restrict__ floatimg, int ncols, int nrows)
 {
-  const float factor = 0.01f;   /* for truncating tail */
+    int x = blockIdx.x *blockDim.x +threadIdx.x;
+    int y =blockIdx.y *blockDim.y +threadIdx.y;
+    
+    if (x < ncols && y< nrows) {
+        int idx = y * ncols + x;
+        floatimg[idx] =(float)img[idx];
+    }
+}
+
+void _KLTToFloatImageGPU( KLT_PixelType *img, int ncols, int nrows, _KLT_FloatImage floatimg)
+{
+    /* Output image must be large enough to hold result */
+    assert(floatimg->ncols >= ncols);
+    assert(floatimg->nrows >= nrows);
+
+    floatimg->ncols = ncols;
+    floatimg->nrows = nrows;
+
+    KLT_PixelType *d_img;
+    size_t img_size = ncols * nrows * sizeof(KLT_PixelType);
+    cudaMalloc(&d_img, img_size);
+    
+    cudaMemcpy(d_img, img, img_size, cudaMemcpyHostToDevice);
+
+    dim3 block(16, 16);
+    dim3 grid((ncols + block.x - 1) / block.x,
+              (nrows + block.y - 1) / block.y);
+    convertToFloatKernel<<<grid, block>>>(
+        d_img, floatimg->data, ncols, nrows);
+
+    cudaFree(d_img);
+}
+
+static void computeKernelsGPU( float sigma, ConvolutionKernel *gauss, ConvolutionKernel *gaussderiv)
+{
+  const float factor = 0.01f; 
   int i;
 
   assert(MAX_KERNEL_WIDTH % 2 == 1);
   assert(sigma >= 0.0);
 
-  /* Compute kernels, and automatically determine widths */
   {
     const int hw = MAX_KERNEL_WIDTH / 2;
     float max_gauss = 1.0f, max_gaussderiv = (float) (sigma*exp(-0.5f));
@@ -86,8 +105,7 @@ static void computeKernelsGPU(
          i++, gaussderiv->width -= 2);
     if (gauss->width == MAX_KERNEL_WIDTH || 
         gaussderiv->width == MAX_KERNEL_WIDTH)
-      KLTError("(_computeKernels) MAX_KERNEL_WIDTH %d is too small for "
-               "a sigma of %f", MAX_KERNEL_WIDTH, sigma);
+      KLTError("(_computeKernels) MAX_KERNEL_WIDTH %d is too small for " "a sigma of %f", MAX_KERNEL_WIDTH, sigma);
   }
 
   /* Shift if width less than MAX_KERNEL_WIDTH */
@@ -111,10 +129,7 @@ static void computeKernelsGPU(
   sigma_last = sigma;
 }
 
-void _KLTGetKernelWidths(
-  float sigma,
-  int *gauss_width,
-  int *gaussderiv_width)
+void _KLTGetKernelWidths( float sigma, int *gauss_width, int *gaussderiv_width)
 {
   computeKernelsGPU(sigma, &gauss_kernel, &gaussderiv_kernel);
   *gauss_width = gauss_kernel.width;
@@ -158,7 +173,7 @@ __global__ void convolveHorizShared(
             gy = max(0, min(gy, nrows - 1));
 
             // Load into shared memory
-            tile[dy * TILE_W + dx] = imgin[gy * ncols + gx];
+            tile[dy * (TILE_W + 1) + dx] = imgin[gy * ncols + gx];
         }
     }
 
@@ -174,7 +189,7 @@ __global__ void convolveHorizShared(
     // Horizontal convolution entirely from shared memory
     for (int k = -R; k <= R; k++) {
     	float coeff = use_deriv ? d_kernel_deriv[R - k] : d_kernel[R - k];
-        sum += tile[tile_y * TILE_W + (tile_x + k)] * coeff;
+        sum += tile[tile_y * (TILE_W + 1) + (tile_x + k)] * coeff;
     }
         
     imgout[out_y * ncols + out_x] = sum;
@@ -215,7 +230,7 @@ __global__ void convolveVertShared(
             gx = max(0, min(gx, ncols - 1));
             gy = max(0, min(gy, nrows - 1));
 
-            tile[dy * TILE_W + dx] = imgin[gy * ncols + gx];
+            tile[dy * (TILE_W + 1) + dx] = imgin[gy * ncols + gx];
         }
     }
 
@@ -232,16 +247,11 @@ __global__ void convolveVertShared(
     // Vertical convolution from shared memory
     for (int k = -R; k <= R; k++) {
     	float coeff = use_deriv ? d_kernel_deriv[R - k] : d_kernel[R - k];
-        sum += tile[(tile_y + k) * TILE_W + tile_x] * coeff;
+        sum += tile[(tile_y + k) * (TILE_W + 1) + tile_x] * coeff;
     }
 
     imgout[out_y * ncols + out_x] = sum;
 }
-
-
-// ===============================
-// Host wrappers
-// ===============================
 
 void convolveImageHorizGPU(
   _KLT_FloatImage imgin,
@@ -253,7 +263,6 @@ void convolveImageHorizGPU(
   int imgSize = ncols * nrows * sizeof(float);
   int kSize = kernel.width * sizeof(float);
 
-  float *d_in, *d_out;
   ensureDeviceBuffers(imgSize);
   cudaMemcpy(d_in_global, imgin->data, imgSize, cudaMemcpyHostToDevice);
   
@@ -271,7 +280,7 @@ void convolveImageHorizGPU(
   int R = kernel.width / 2;
   int TILE_W = block.x + 2*R;
   int TILE_H = block.y;
-  int sharedBytes = TILE_W * TILE_H * sizeof(float);
+  size_t sharedBytes = (TILE_W + 1) * TILE_H * sizeof(float);
 
 convolveHorizShared<<<grid, block, sharedBytes>>>(
     d_in_global, d_out_global,
@@ -279,7 +288,8 @@ convolveHorizShared<<<grid, block, sharedBytes>>>(
     kernel.width,
     use_deriv
 );
-cudaMemcpy(imgout->data, d_out_global, imgSize, cudaMemcpyDeviceToHost);
+
+  cudaMemcpy(imgout->data, d_out_global, imgSize, cudaMemcpyDeviceToHost);
 }
 
 
@@ -292,11 +302,10 @@ void convolveImageVertGPU(
   int ncols = imgin->ncols, nrows = imgin->nrows;
   int imgSize = ncols * nrows * sizeof(float);
   int kSize = kernel.width * sizeof(float);
-
-  float *d_in, *d_out;
   
   ensureDeviceBuffers(imgSize);
-cudaMemcpy(d_in_global, imgin->data, imgSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_in_global, imgin->data, imgSize, cudaMemcpyHostToDevice);
+  
   // upload correct kernel into constant memory (derivative or gaussian)
   if (use_deriv) {
       cudaMemcpyToSymbol(d_kernel_deriv, kernel.data, kSize);
@@ -308,19 +317,19 @@ cudaMemcpy(d_in_global, imgin->data, imgSize, cudaMemcpyHostToDevice);
   dim3 grid((ncols + block.x - 1) / block.x,
             (nrows + block.y - 1) / block.y);
 
- int R = kernel.width / 2;
-int TILE_W = block.x + 2*R;
-int TILE_H = block.y;
-int sharedBytes = TILE_W * TILE_H * sizeof(float);
+  int R = kernel.width / 2;
+  int TILE_W = block.x + 2*R;
+  int TILE_H = block.y;
+  size_t sharedBytes = (TILE_W + 1) * TILE_H * sizeof(float);
 
-convolveVertShared<<<grid, block, sharedBytes>>>(
-    d_in_global, d_out_global,
-    ncols, nrows,
-    kernel.width,
-    use_deriv
+  convolveVertShared<<<grid, block, sharedBytes>>>(
+      d_in_global, d_out_global,
+      ncols, nrows,
+      kernel.width,
+      use_deriv
 );
 
-cudaMemcpy(imgout->data, d_out_global, imgSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(imgout->data, d_out_global, imgSize, cudaMemcpyDeviceToHost);
 }
 
 
@@ -364,14 +373,28 @@ void _KLTComputeGradients(
 
 }
 
-/*********************************************************************
- * _KLTComputeSmoothedImage
- */
-
-void _KLTComputeSmoothedImage(
+void _KLTComputeGradientsGPU(
   _KLT_FloatImage img,
   float sigma,
-  _KLT_FloatImage smooth)
+  _KLT_FloatImage gradx,
+  _KLT_FloatImage grady)
+{
+  /* Output images must be large enough to hold result */
+  assert(gradx->ncols >= img->ncols);
+  assert(gradx->nrows >= img->nrows);
+  assert(grady->ncols >= img->ncols);
+  assert(grady->nrows >= img->nrows);
+
+  /* Compute kernels, if necessary */
+  if (fabs(sigma - sigma_last) > 0.05)
+    computeKernelsGPU(sigma, &gauss_kernel, &gaussderiv_kernel);
+
+  convolveSeparateGPUDevicePyramids(img->data, gradx->data, img->ncols, img->nrows, gaussderiv_kernel, gauss_kernel, 1, 0);
+
+  convolveSeparateGPUDevicePyramids(img->data, grady->data, img->ncols, img->nrows, gauss_kernel, gaussderiv_kernel, 0, 1);
+}
+
+void _KLTComputeSmoothedImage( _KLT_FloatImage img, float sigma, _KLT_FloatImage smooth)
 {
   /* Output image must be large enough to hold result */
   assert(smooth->ncols >= img->ncols);
@@ -384,6 +407,113 @@ void _KLTComputeSmoothedImage(
   convolveSeparateGPU(img, gauss_kernel, gauss_kernel, smooth);
 }
 
+void convolveSeparateGPUDevicePyramids(
+    float* d_imgin,
+    float* d_imgout,
+    int ncols, int nrows,
+    ConvolutionKernel horiz_kernel,
+    ConvolutionKernel vert_kernel,
+    int horiz_deriv,
+    int vert_deriv)
+{
+    size_t imgSize = (size_t)ncols * (size_t)nrows * sizeof(float);
+    float *d_tmp = nullptr;
+    cudaError_t cerr;
+
+    // Allocate temporary buffer for intermediate result
+    cerr = cudaMalloc(&d_tmp, imgSize);
+    if (cerr != cudaSuccess) {
+        //fprintf(stderr, "cudaMalloc d_tmp failed: %s\n", cudaGetErrorString(cerr));
+        return;
+    }
+
+    // ---------- HORIZONTAL pass ----------
+    {
+        // Upload correct kernel to constant memory
+        int kSize = horiz_kernel.width * sizeof(float);
+        if (horiz_deriv)
+            cudaMemcpyToSymbol(d_kernel_deriv, horiz_kernel.data, kSize);
+        else
+            cudaMemcpyToSymbol(d_kernel, horiz_kernel.data, kSize);
+
+        // Launch params
+        dim3 block(32, 8);
+        dim3 grid((ncols + block.x - 1) / block.x,
+                  (nrows + block.y - 1) / block.y);
+
+        int R = horiz_kernel.width / 2;
+        int TILE_W = block.x + 2 * R;
+        int TILE_H = block.y;
+        size_t sharedBytes = (size_t)(TILE_W + 1) * (size_t)TILE_H * sizeof(float);
+
+        // d_imgin -> d_tmp
+        convolveHorizShared<<<grid, block, sharedBytes>>>(
+            d_imgin, d_tmp,
+            ncols, nrows,
+            horiz_kernel.width,
+            horiz_deriv
+        );
+
+        cerr = cudaGetLastError();
+        if (cerr != cudaSuccess) {
+         //   fprintf(stderr, "convolveHorizShared launch failed: %s\n", cudaGetErrorString(cerr));
+            cudaFree(d_tmp);
+            return;
+        }
+    }
+
+    // ---------- VERTICAL pass ----------
+    {
+        // Upload correct kernel to constant memory
+        int kSize = vert_kernel.width * sizeof(float);
+        if (vert_deriv)
+            cudaMemcpyToSymbol(d_kernel_deriv, vert_kernel.data, kSize);
+        else
+            cudaMemcpyToSymbol(d_kernel, vert_kernel.data, kSize);
+
+        // Launch params
+        dim3 blockV(16, 16);
+        dim3 gridV((ncols + blockV.x - 1) / blockV.x,
+                   (nrows + blockV.y - 1) / blockV.y);
+
+        int Rv = vert_kernel.width / 2;
+        int TILE_Wv = blockV.x;
+        int TILE_Hv = blockV.y + 2 * Rv;
+        size_t sharedBytesV = (size_t)(TILE_Wv + 1) * (size_t)TILE_Hv * sizeof(float);
+
+        // d_tmp -> d_imgout
+        convolveVertShared<<<gridV, blockV, sharedBytesV>>>(
+            d_tmp, d_imgout,
+            ncols, nrows,
+            vert_kernel.width,
+            vert_deriv
+        );
+
+        cerr = cudaGetLastError();
+       /* if (cerr != cudaSuccess) {
+            fprintf(stderr, "convolveVertShared launch failed: %s\n", cudaGetErrorString(cerr));
+        } */
+    }
+
+    // Free temporary buffer
+    cudaFree(d_tmp);
+}
+
+void _KLTComputeSmoothedImageGPU(
+    _KLT_FloatImage img,
+    float sigma,
+    _KLT_FloatImage smooth)
+{
+    /* Output image must be large enough to hold result */
+    assert(smooth->ncols >= img->ncols);
+    assert(smooth->nrows >= img->nrows);
+
+    if (fabs(sigma - sigma_last) > 0.05)
+        computeKernelsGPU(sigma, &gauss_kernel, &gaussderiv_kernel);
+
+    convolveSeparateGPUDevicePyramids(img->data, smooth->data, img->ncols, img->nrows,gauss_kernel, gauss_kernel, 0, 0);
+}
+
 void freeConvolutionBuffersGPU()
 {
     if (d_in_global) cudaFree(d_in_global);
@@ -391,4 +521,3 @@ void freeConvolutionBuffersGPU()
     d_in_global = d_out_global = nullptr;
     d_alloc_size = 0;
 }
-
