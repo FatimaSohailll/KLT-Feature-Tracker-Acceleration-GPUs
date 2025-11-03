@@ -21,6 +21,26 @@ static float sigma_last = -10.0;
 // Device kernels
 // ===============================
 
+
+
+void _KLTToFloatImage(
+  KLT_PixelType *img,
+  int ncols, int nrows,
+  _KLT_FloatImage floatimg)
+{
+  KLT_PixelType *ptrend = img + ncols*nrows;
+  float *ptrout = floatimg->data;
+
+  /* Output image must be large enough to hold result */
+  assert(floatimg->ncols >= ncols);
+  assert(floatimg->nrows >= nrows);
+
+  floatimg->ncols = ncols;
+  floatimg->nrows = nrows;
+
+  while (img < ptrend)  *ptrout++ = (float) *img++;
+}
+
 static void computeKernelsGPU(
   float sigma,
   ConvolutionKernel *gauss,
@@ -75,6 +95,16 @@ static void computeKernelsGPU(
   }
 
   sigma_last = sigma;
+}
+
+void _KLTGetKernelWidths(
+  float sigma,
+  int *gauss_width,
+  int *gaussderiv_width)
+{
+  computeKernelsGPU(sigma, &gauss_kernel, &gaussderiv_kernel);
+  *gauss_width = gauss_kernel.width;
+  *gaussderiv_width = gaussderiv_kernel.width;
 }
 
 __global__ void convolveHorizKernel(const float* imgin, float* imgout,

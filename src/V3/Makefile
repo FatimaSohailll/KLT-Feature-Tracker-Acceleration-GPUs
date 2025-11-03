@@ -4,10 +4,11 @@ CC = gcc
 NVCC = nvcc
 
 ######################################################################
-# Flags
+# Flags with warninf suppressions
 FLAG1 = -DNDEBUG
-CFLAGS = $(FLAG1) -pg
-NVCCFLAGS = -std=c++11 -I. -arch=sm_86
+CFLAGS = $(FLAG1) -pg -O3 -Wno-unused-result -Wno-format-security
+NVCCFLAGS = -std=c++11 -I. -arch=sm_86 -Wno-deprecated-declarations
+
 
 ######################################################################
 # CUDA path
@@ -19,10 +20,13 @@ CUDA_INC_PATH = /opt/nvidia/hpc_sdk/Linux_x86_64/25.7/cuda/12.9/targets/x86_64-l
 ARCH_CPU = convolve.c error.c pnmio.c pyramid.c selectGoodFeatures.c \
            storeFeatures.c trackFeatures.c klt.c klt_util.c writeFeatures.c
 
-ARCH_GPU = error.c pnmio.c pyramidGPU.c selectGoodFeaturesGPU.c \
-           storeFeaturesGPU.c kltGPU.c klt_utilGPU.c writeFeaturesGPU.c
+ARCH_GPU = error.c pnmio.c selectGoodFeatures.c \
+           storeFeatures.c kltGPU.c writeFeatures.c
 
-CU_SOURCES = trackFeaturesGPU.cu convolveGPU.cu
+CU_SOURCES = trackFeaturesGPU.cu convolveGPU.cu pyramidGPU.cu klt_utilGPU.cu
+
+######################################################################
+# Examples
 EXAMPLES = example3.c
 
 EXAMPLE3_GPU = example3GPU.c
@@ -63,12 +67,29 @@ gpu: $(ARCH_GPU:.c=.o) $(CU_SOURCES:.cu=.o)
 
 ######################################################################
 # Run targets
+DATASET ?= images_provided
+FEATURES ?= 150
+FRAMES ?= 10
+
+ifeq ($(words $(MAKECMDGOALS)),4)
+DATASET := $(word 2, $(MAKECMDGOALS))
+FEATURES := $(word 3, $(MAKECMDGOALS))
+FRAMES := $(word 4, $(MAKECMDGOALS))
+# prevent make from treating them as targets
+$(eval $(DATASET):;@:)
+$(eval $(FEATURES):;@:)
+$(eval $(FRAMES):;@:)
+endif
+
 run_cpu: cpu
-	./example3_cpu
+	mkdir -p feat
+	@echo "Running CPU example with dataset='$(DATASET)', features=$(FEATURES), frames=$(FRAMES)"
+	./example3_cpu $(DATASET) $(FEATURES) $(FRAMES)
 
 run_gpu: gpu
-	LD_LIBRARY_PATH=$(CUDA_LIB_PATH):$$LD_LIBRARY_PATH ./example3_gpu
-
+	mkdir -p feat
+	@echo "Running GPU example with dataset='$(DATASET)', features=$(FEATURES), frames=$(FRAMES)"
+	LD_LIBRARY_PATH=$(CUDA_LIB_PATH):$$LD_LIBRARY_PATH ./example3_gpu $(DATASET) $(FEATURES) $(FRAMES)
 ######################################################################
 # Clean targets
 clean:
@@ -94,7 +115,7 @@ $(GPROF2DOT):
 	chmod +x gprof2dot.py
 
 ######################################################################
-# Profiling - FIXED: removed comment from execution line
+# Profiling 
 gprof: $(EXAMPLE)
 	@echo "Running gprof for $(EXAMPLE)..."
 	./$(EXAMPLE)
