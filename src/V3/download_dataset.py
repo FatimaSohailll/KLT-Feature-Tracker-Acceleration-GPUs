@@ -6,7 +6,8 @@ import zipfile
 # === CONFIGURATION ===
 DATASET_FILES = {
     "images_laptops.zip": "https://huggingface.co/datasets/FatimaSohailll/PPM-Image-Dataset-for-KLT-Feature-Tracking/resolve/main/images_laptops.zip",
-    "images_traffic.zip": "https://huggingface.co/datasets/FatimaSohailll/PPM-Image-Dataset-for-KLT-Feature-Tracking/resolve/main/images_traffic.zip"
+    "images_traffic.zip": "https://huggingface.co/datasets/FatimaSohailll/PPM-Image-Dataset-for-KLT-Feature-Tracking/resolve/main/images_traffic.zip",
+    "images_city.zip": "https://huggingface.co/datasets/FatimaSohailll/PPM-Image-Dataset-for-KLT-Feature-Tracking/resolve/main/images_city.zip"
 }
 DATA_DIR = "../../data"
 
