@@ -1,80 +1,141 @@
 ######################################################################
-# Choose your favorite C compiler
-CC = gcc
+# Compiler: use NVIDIA HPC SDK (OpenACC)
+CC = nvc
 
 ######################################################################
-# -DNDEBUG prevents the assert() statements from being included in 
-# the code.  If you are having problems running the code, you might 
-# want to comment this line to see if an assert() statement fires.
-FLAG1 = -DNDEBUG
+# Flags
+# -acc            → enable OpenACC
+# -Minfo=accel    → show accelerator optimization info
+# -fast           → aggressive optimization
+# -DNDEBUG        → disable asserts (optional)
+CFLAGS = -acc -Minfo=accel -fast -DNDEBUG
+CPU_CFLAGS = -pg -fast -DNDEBUG
+GPU_CFLAGS = -acc -Minfo=accel -fast -DNDEBUG
 
 ######################################################################
-# -DKLT_USE_QSORT forces the code to use the standard qsort() 
-# routine.  Otherwise it will use a quicksort routine that takes
-# advantage of our specific data structure to greatly reduce the
-# running time on some machines.  Uncomment this line if for some
-# reason you are unhappy with the special routine.
-# FLAG2 = -DKLT_USE_QSORT
-
-######################################################################
-# Add your favorite C flags here.
-CFLAGS = $(FLAG1) $(FLAG2) -pg
-
-
-######################################################################
-# There should be no need to modify anything below this line (but
-# feel free to if you want).
-
+# Source files
 EXAMPLES = example3.c
-ARCH = convolve.c error.c pnmio.c pyramid.c selectGoodFeatures.c \
+ARCHCPU = convolve.c error.c pnmio.c pyramid.c selectGoodFeatures.c \
        storeFeatures.c trackFeatures.c klt.c klt_util.c writeFeatures.c
+ARCHGPU = convolveGPU.c error.c pnmio.c pyramid.c selectGoodFeatures.c \
+       storeFeatures.c trackFeatures.c klt.c klt_util.c writeFeatures.c
+
 LIB = -L/usr/local/lib -L/usr/lib
 
-.SUFFIXES:  .c .o
+######################################################################
+# Runtime parameters with defaults
+DATASET ?= images_provided
+FEATURES ?= 150
+FRAMES ?= 10
 
-all:  lib $(EXAMPLES:.c=)
+# Handle command line parameters for run targets
+ifeq ($(words $(MAKECMDGOALS)),4)
+DATASET := $(word 2, $(MAKECMDGOALS))
+FEATURES := $(word 3, $(MAKECMDGOALS))
+FRAMES := $(word 4, $(MAKECMDGOALS))
+# prevent make from treating them as targets
+$(eval $(DATASET):;@:)
+$(eval $(FEATURES):;@:)
+$(eval $(FRAMES):;@:)
+endif
 
-.c.o:
-	$(CC) -c $(CFLAGS) $<
-
-lib: $(ARCH:.c=.o)
-	rm -f libklt.a
-	ar ruv libklt.a $(ARCH:.c=.o)
-	rm -f *.o
-
-example3: libklt.a
-	$(CC) -O3 $(CFLAGS) -o $@ $@.c -L. -lklt $(LIB) -lm
-
-depend:
-	makedepend $(ARCH) $(EXAMPLES)
-
-clean:
-	rm -f *.o *.a $(EXAMPLES:.c=) *.tar *.tar.gz libklt.a \
-	      feat*.ppm features.ft features.txt
-
+.SUFFIXES: .c .o
 
 ######################################################################
-# Profiling and Visualization Rules (generic)
+# Build everything
+all: klt_cpu klt_gpu
 
-# External tools
+######################################################################
+# Compile .c → .o for CPU
+cpu_%.o: %.c
+	$(CC) -c $(CPU_CFLAGS) -o $@ $<
+
+######################################################################
+# Compile .c → .o for GPU  
+gpu_%.o: %.c
+	$(CC) -c $(GPU_CFLAGS) -o $@ $<
+
+######################################################################
+# Build CPU version
+klt_cpu: $(addprefix cpu_, $(ARCHCPU:.c=.o))
+	rm -f libklt_cpu.a
+	ar ruv libklt_cpu.a $^
+	$(CC) $(CPU_CFLAGS) -o example3_cpu example3.c -L. -lklt_cpu $(LIB) -lm
+
+######################################################################
+# Build GPU version
+klt_gpu: $(addprefix gpu_, $(ARCHGPU:.c=.o))
+	rm -f libklt_gpu.a
+	ar ruv libklt_gpu.a $^
+	$(CC) $(GPU_CFLAGS) -o example3_gpu example3.c -L. -lklt_gpu $(LIB) -lm
+
+######################################################################
+# Run targets with parameters
+run_cpu: klt_cpu
+	@echo "Running CPU version with dataset=$(DATASET), features=$(FEATURES), frames=$(FRAMES)"
+	./example3_cpu $(DATASET) $(FEATURES) $(FRAMES)
+
+run_gpu: klt_gpu
+	@echo "Running GPU version with dataset=$(DATASET), features=$(FEATURES), frames=$(FRAMES)"
+	./example3_gpu $(DATASET) $(FEATURES) $(FRAMES)
+
+######################################################################
+# Individual object file rules to handle special cases
+cpu_convolve.o: convolve.c
+	$(CC) -c $(CPU_CFLAGS) -o $@ $<
+
+gpu_convolveGPU.o: convolveGPU.c
+	$(CC) -c $(GPU_CFLAGS) -o $@ $<
+
+######################################################################
+# Clean rule
+clean:
+	rm -f *.o *.a example3_cpu example3_gpu $(EXAMPLES:.c=) *.tar *.tar.gz \
+	      libklt_cpu.a libklt_gpu.a cpu_*.o gpu_*.o feat*.ppm features.ft features.txt
+
+nsys:
+	# Example with actual arguments
+	nsys profile --trace=openacc,nvtx,osrt --stats=true ./example3_gpu $(DATASET) $(FEATURES) $(FRAMES)
+######################################################################
+# Debug targets to see what's being built
+debug:
+	@echo "CPU objects: $(addprefix cpu_, $(ARCHCPU:.c=.o))"
+	@echo "GPU objects: $(addprefix gpu_, $(ARCHGPU:.c=.o))"
+	@echo "Default parameters: DATASET=$(DATASET), FEATURES=$(FEATURES), FRAMES=$(FRAMES)"
+
+######################################################################
+# Help
+help:
+	nsys profile --trace=openacc,nvtx,osrt --stats=true ./example3_gpu 
+	@echo "Available targets:"
+	@echo "  all       - Build both CPU and GPU versions"
+	@echo "  klt_cpu   - Build CPU version only"
+	@echo "  klt_gpu   - Build GPU version only"
+	@echo "  run_cpu   - Build and run CPU version with default parameters"
+	@echo "  run_gpu   - Build and run GPU version with default parameters"
+	@echo "  clean     - Clean all built files"
+	@echo "  debug     - Show build configuration"
+	@echo ""
+	@echo "Usage with custom parameters:"
+	@echo "  make run_cpu <dataset> <features> <frames>"
+	@echo "  make run_gpu <dataset> <features> <frames>"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make run_cpu images_provided 100 5"
+	@echo "  make run_gpu my_dataset 200 15"
+	@echo ""
+	@echo "Current defaults: DATASET=$(DATASET), FEATURES=$(FEATURES), FRAMES=$(FRAMES)"
+
 GPROF2DOT = ./gprof2dot.py
 DOT = dot
 
-# Select example (default = example1)
-EXAMPLE ?= example3
+EXAMPLE ?= example3_cpu
 PROFILE_TXT = $(EXAMPLE)_analysis.txt
 PROFILE_DOT = $(EXAMPLE)_analysis.dot
 PROFILE_PNG = $(EXAMPLE)_analysis.png
 PROFILE_PDF = $(EXAMPLE)_analysis.pdf
 
-# Download gprof2dot if missing
-$(GPROF2DOT):
-	wget https://raw.githubusercontent.com/jrfonseca/gprof2dot/master/gprof2dot.py
-	chmod +x gprof2dot.py
-
-# Run example to generate gmon.out and gprof text
-gprof: $(EXAMPLE)
-	./$(EXAMPLE)
+gprof: ./$(EXAMPLE)
 	gprof ./$(EXAMPLE) gmon.out > $(PROFILE_TXT)
 
 # Convert gprof text to DOT
