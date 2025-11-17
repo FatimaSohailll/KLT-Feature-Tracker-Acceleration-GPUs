@@ -59,10 +59,37 @@ make png
 make pdf
 ```
 
-# For Naive GPU Execution 
+# For Optimised GPU Execution 
 ```bash
 cd src/V3
 make clean
 make gpu
 make run_gpu <datasetName> <Features> <Frames>
-``
+```
+## Deliverable 4 Makefile Usage
+
+# For CPU-only Execution 
+```bash
+cd src/V4
+make clean
+make run_cpu
+make run_cpu <datasetName> <Features> <Frames>
+```
+## Deliverable 4 Makefile Usage
+
+# For CPU-Only Execution 
+```bash
+cd src/V4
+make clean
+make run_cpu
+make run_cpu <datasetName> <Features> <Frames>
+```
+
+# For OpenAcc Execution 
+```bash
+cd src/V4
+make clean
+make run_gpu
+make run_gpu <datasetName> <Features> <Frames>
+make nsys <datasetName> <Features> <Frames>
+```
